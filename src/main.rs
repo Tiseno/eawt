@@ -48,7 +48,9 @@ fn tokenize(input: &str) -> Vec<Token> {
     let mut tokens: Vec<Token> = vec![];
 
     while let Some(ch) = it.next() {
-        if ch.is_ascii_digit() {
+        if ch == ' ' {
+            // Skip whitespace between tokens
+        } else if ch.is_ascii_digit() {
             let mut s: String = ch.into();
             while let Some(ch) = it.peek() {
                 if ch.is_ascii_digit() {
