@@ -2,11 +2,16 @@ use std::env;
 
 fn main() {
     let input = env::args().skip(1).collect::<Vec<String>>().join(" ");
-    dbg!(&input);
     let tokens = tokenize(&input);
-    dbg!(&tokens);
-    let parsed = parse(&tokens);
-    dbg!(parsed);
+    let parsed = match parse(&tokens) {
+        Ok(p) => p,
+        Err(err) => {
+            println!("{}", err);
+            return;
+        }
+    };
+    let result = calculate(&parsed);
+    println!("{}", result);
 }
 
 #[derive(Clone, Debug)]
@@ -28,16 +33,25 @@ impl Token {
     }
 }
 
+impl std::fmt::Display for Token {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Token::Number(n) => write!(f, "Number({})", n),
+            _ => write!(f, "{}", self.name()),
+        }
+    }
+}
+
 fn tokenize(input: &str) -> Vec<Token> {
     let mut it = input.chars().peekable();
 
     let mut tokens: Vec<Token> = vec![];
 
     while let Some(ch) = it.next() {
-        if ch.is_digit(10) {
+        if ch.is_ascii_digit() {
             let mut s: String = ch.into();
             while let Some(ch) = it.peek() {
-                if ch.is_digit(10) {
+                if ch.is_ascii_digit() {
                     s.push(*ch);
                     it.next();
                 } else {
@@ -52,11 +66,12 @@ fn tokenize(input: &str) -> Vec<Token> {
         } else if ch == '-' {
             tokens.push(Token::Minus);
         } else {
+            // TODO handle unexpected tokens
             return tokens;
         }
     }
 
-    return tokens;
+    tokens
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -72,8 +87,38 @@ struct TimeValue {
 }
 
 impl TimeValue {
+    fn new(hours: u32, minutes: u32) -> Self {
+        *TimeValue { hours, minutes }.normalize()
+    }
+
     fn from_hours(hours: u32) -> Self {
-        TimeValue { hours, minutes: 0 }
+        TimeValue::new(hours, 0)
+    }
+
+    fn normalize(&mut self) -> &Self {
+        let total_minutes = self.hours * 60 + self.minutes;
+        self.minutes = total_minutes % 60;
+        self.hours = (total_minutes - self.minutes) / 60;
+        self
+    }
+
+    fn add(&mut self, v: &TimeValue) -> &Self {
+        self.hours += v.hours;
+        self.minutes += v.minutes;
+        self.normalize()
+    }
+
+    fn subtract(&mut self, v: &TimeValue) -> &Self {
+        self.hours -= v.hours;
+        self.minutes -= v.minutes;
+        self.normalize()
+    }
+}
+
+impl std::fmt::Display for TimeValue {
+    // TODO make this better, will display 8:5 and 0:0 which should be 8:05 and 0:00
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.hours, self.minutes)
     }
 }
 
@@ -81,7 +126,6 @@ impl TimeValue {
 enum Parsed {
     Value(TimeValue),
     Operator(Operator),
-    EndOfInput,
 }
 
 fn parse(tokens: &[Token]) -> Result<Vec<Parsed>, ParseError> {
@@ -99,23 +143,34 @@ fn parse(tokens: &[Token]) -> Result<Vec<Parsed>, ParseError> {
 }
 
 #[derive(Clone, Debug)]
-struct UnexpectedTokenError {
-    n: u32,
-    expected_token: &'static str,
-    unexpected_token: Token,
+struct UnexpectedToken {
+    expected: &'static str,
+    unexpected: Token,
 }
 
 #[derive(Clone, Debug)]
 enum ParseError {
     EndOfInput,
-    TokenError(UnexpectedTokenError),
+    TokenError(UnexpectedToken),
 }
 
-fn expected_number_error(n: u32, token: &Token) -> ParseError {
-    return ParseError::TokenError(UnexpectedTokenError {
-        n,
-        expected_token: Token::Number(String::new()).name(),
-        unexpected_token: token.clone(),
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseError::EndOfInput => write!(f, "Parse error: unexpected end of input"),
+            ParseError::TokenError(unexpected_token) => write!(
+                f,
+                "Parse error: expected token of variant {} but reached token {}",
+                unexpected_token.expected, unexpected_token.unexpected
+            ),
+        }
+    }
+}
+
+fn expected_number_error(token: &Token) -> ParseError {
+    return ParseError::TokenError(UnexpectedToken {
+        expected: Token::Number(String::new()).name(),
+        unexpected: token.clone(),
     });
 }
 
@@ -148,7 +203,7 @@ fn parse_value(
             if has_parsed {
                 return Ok(Parsed::Value(TimeValue::from_hours(hours)));
             }
-            return Err(expected_number_error(1, &t2));
+            return Err(expected_number_error(t2));
         }
     };
 
@@ -156,12 +211,9 @@ fn parse_value(
     match t3 {
         Token::Number(n) => {
             it.next();
-            return Ok(Parsed::Value(TimeValue {
-                hours,
-                minutes: n.parse().unwrap(),
-            }));
+            Ok(Parsed::Value(TimeValue::new(hours, n.parse().unwrap())))
         }
-        _ => return Err(expected_number_error(2, &t3)),
+        _ => Err(expected_number_error(t3)),
     }
 }
 
@@ -172,8 +224,36 @@ fn parse_operator(
     let p = match t {
         Token::Plus => Parsed::Operator(Operator::Add),
         Token::Minus => Parsed::Operator(Operator::Subtract),
-        _ => return Err(expected_number_error(3, &t)),
+        _ => return Err(expected_number_error(t)),
     };
     it.next();
     Ok(p)
+}
+
+// TODO do this nicer, we know that the parsed list is values separated by operators
+// fn calculate(firstValue: TimeValue, terms: &[(Operator, TimeValue)])
+fn calculate(parsed: &[Parsed]) -> TimeValue {
+    let mut it = parsed.iter().peekable();
+    let mut t = match it.next().unwrap() {
+        Parsed::Value(t) => *t,
+        _ => todo!(),
+    };
+
+    while it.peek().is_some() {
+        let op = match it.next().unwrap() {
+            Parsed::Operator(o) => o,
+            _ => todo!(),
+        };
+        let v = match it.next().unwrap() {
+            Parsed::Value(v) => v,
+            _ => todo!(),
+        };
+
+        match op {
+            Operator::Add => t.add(v),
+            Operator::Subtract => t.subtract(v),
+        };
+    }
+
+    t
 }
