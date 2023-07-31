@@ -1,5 +1,5 @@
 default:
-	cargo run -q -- 8:00+5:00
+	cargo run -q -- 1:00+2:00
 
 release:
 	cargo build -r

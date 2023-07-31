@@ -6,12 +6,12 @@ fn main() {
     let parsed = match parse(&tokens) {
         Ok(p) => p,
         Err(err) => {
-            println!("{}", err);
+            print!("{}", err);
             return;
         }
     };
     let result = calculate(&parsed);
-    println!("{}", result);
+    print!("{}", result);
 }
 
 #[derive(Clone, Debug)]
@@ -118,9 +118,14 @@ impl TimeValue {
 }
 
 impl std::fmt::Display for TimeValue {
-    // TODO make this better, will display 8:5 and 0:0 which should be 8:05 and 0:00
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.hours, self.minutes)
+        let hour_padding = if self.hours < 10 { "0" } else { "" };
+        let minute_padding = if self.minutes < 10 { "0" } else { "" };
+        write!(
+            f,
+            "{}{}:{}{}",
+            hour_padding, self.hours, minute_padding, self.minutes
+        )
     }
 }
 
