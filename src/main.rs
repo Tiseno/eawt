@@ -2,16 +2,16 @@ use std::env;
 
 fn main() {
     let input = env::args().skip(1).collect::<Vec<String>>().join(" ");
-    let tokens = tokenize(&input);
-    let parsed = match parse(&tokens) {
-        Ok(p) => p,
-        Err(err) => {
-            print!("{}", err);
-            return;
-        }
+    match evaluate(&input) {
+        Ok(result) => print!("{}", result),
+        Err(err) => print!("{}", err),
     };
-    let result = calculate(&parsed);
-    print!("{}", result);
+}
+
+fn evaluate(input: &str) -> Result<TimeValue, Error> {
+    let tokens = tokenize(input)?;
+    let parsed = parse(&tokens)?;
+    Ok(calculate(&parsed))
 }
 
 #[derive(Clone, Debug)]
@@ -42,13 +42,29 @@ impl std::fmt::Display for Token {
     }
 }
 
-fn tokenize(input: &str) -> Vec<Token> {
+#[derive(Clone, Debug)]
+struct UnrecognizedCharacter {
+    unrecognized: char,
+}
+
+#[derive(Clone, Debug)]
+struct UnexpectedToken {
+    expected: &'static str,
+    unexpected: Token,
+}
+
+#[derive(Clone, Debug)]
+enum Error {
+    UnrecognizedCharacter(UnrecognizedCharacter),
+    UnexpectedToken(UnexpectedToken),
+    EndOfInput,
+}
+
+fn tokenize(input: &str) -> Result<Vec<Token>, Error> {
     let mut it = input.chars().peekable();
-
     let mut tokens: Vec<Token> = vec![];
-
     while let Some(ch) = it.next() {
-        if ch == ' ' {
+        if ch.is_whitespace() {
             // Skip whitespace between tokens
         } else if ch.is_ascii_digit() {
             let mut s: String = ch.into();
@@ -68,12 +84,13 @@ fn tokenize(input: &str) -> Vec<Token> {
         } else if ch == '-' {
             tokens.push(Token::Minus);
         } else {
-            // TODO handle unexpected tokens
-            return tokens;
+            return Err(Error::UnrecognizedCharacter(UnrecognizedCharacter {
+                unrecognized: ch,
+            }));
         }
     }
 
-    tokens
+    Ok(tokens)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -129,62 +146,56 @@ impl std::fmt::Display for TimeValue {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-enum Parsed {
-    Value(TimeValue),
-    Operator(Operator),
-}
-
-fn parse(tokens: &[Token]) -> Result<Vec<Parsed>, ParseError> {
+fn parse(tokens: &[Token]) -> Result<(TimeValue, Vec<(Operator, TimeValue)>), Error> {
     let mut it = tokens.iter().peekable();
-
-    let mut parsed: Vec<Parsed> = vec![];
+    let first = parse_value(&mut it)?;
+    let mut following: Vec<(Operator, TimeValue)> = vec![];
     loop {
-        parsed.push(parse_value(&mut it)?);
-        match parse_operator(&mut it) {
-            Err(ParseError::EndOfInput) => return Ok(parsed),
-            Err(err) => return Err(err),
-            Ok(p) => parsed.push(p),
+        if it.peek().is_none() {
+            return Ok((first, following));
         }
+        let op = parse_operator(&mut it)?;
+        let value = parse_value(&mut it)?;
+        following.push((op, value));
     }
 }
 
-#[derive(Clone, Debug)]
-struct UnexpectedToken {
-    expected: &'static str,
-    unexpected: Token,
-}
-
-#[derive(Clone, Debug)]
-enum ParseError {
-    EndOfInput,
-    TokenError(UnexpectedToken),
-}
-
-impl std::fmt::Display for ParseError {
+impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::EndOfInput => write!(f, "Parse error: unexpected end of input"),
-            ParseError::TokenError(unexpected_token) => write!(
+            Error::UnrecognizedCharacter(unrecognized_character) => write!(
                 f,
-                "Parse error: expected token of variant {} but reached token {}",
+                "Input error: unrecognized character '{}'",
+                unrecognized_character.unrecognized,
+            ),
+            Error::UnexpectedToken(unexpected_token) => write!(
+                f,
+                "Parse error: expected {} but found {}",
                 unexpected_token.expected, unexpected_token.unexpected
             ),
+            Error::EndOfInput => write!(f, "Parse error: unexpected end of input"),
         }
     }
 }
 
-fn expected_number_error(token: &Token) -> ParseError {
-    return ParseError::TokenError(UnexpectedToken {
-        expected: Token::Number(String::new()).name(),
+fn expected_number_error(token: &Token) -> Error {
+    Error::UnexpectedToken(UnexpectedToken {
+        expected: "Number",
         unexpected: token.clone(),
-    });
+    })
+}
+
+fn expected_operator_error(token: &Token) -> Error {
+    Error::UnexpectedToken(UnexpectedToken {
+        expected: "Operator",
+        unexpected: token.clone(),
+    })
 }
 
 fn parse_value(
     it: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<Parsed, ParseError> {
-    let t1 = it.peek().ok_or(ParseError::EndOfInput)?;
+) -> Result<TimeValue, Error> {
+    let t1 = it.peek().ok_or(Error::EndOfInput)?;
     let mut has_parsed = false;
     let hours: u32 = match t1 {
         Token::Number(n) => {
@@ -199,26 +210,26 @@ fn parse_value(
         Some(t) => t,
         None => {
             if has_parsed {
-                return Ok(Parsed::Value(TimeValue::from_hours(hours)));
+                return Ok(TimeValue::from_hours(hours));
             }
-            return Err(ParseError::EndOfInput);
+            return Err(Error::EndOfInput);
         }
     };
     match t2 {
         Token::Colon => it.next(),
         _ => {
             if has_parsed {
-                return Ok(Parsed::Value(TimeValue::from_hours(hours)));
+                return Ok(TimeValue::from_hours(hours));
             }
             return Err(expected_number_error(t2));
         }
     };
 
-    let t3 = it.peek().ok_or(ParseError::EndOfInput)?;
+    let t3 = it.peek().ok_or(Error::EndOfInput)?;
     match t3 {
         Token::Number(n) => {
             it.next();
-            Ok(Parsed::Value(TimeValue::new(hours, n.parse().unwrap())))
+            Ok(TimeValue::new(hours, n.parse().unwrap()))
         }
         _ => Err(expected_number_error(t3)),
     }
@@ -226,41 +237,23 @@ fn parse_value(
 
 fn parse_operator(
     it: &mut std::iter::Peekable<std::slice::Iter<'_, Token>>,
-) -> Result<Parsed, ParseError> {
-    let t = it.peek().ok_or(ParseError::EndOfInput)?;
+) -> Result<Operator, Error> {
+    let t = it.peek().ok_or(Error::EndOfInput)?;
     let p = match t {
-        Token::Plus => Parsed::Operator(Operator::Add),
-        Token::Minus => Parsed::Operator(Operator::Subtract),
-        _ => return Err(expected_number_error(t)),
+        Token::Plus => Operator::Add,
+        Token::Minus => Operator::Subtract,
+        _ => return Err(expected_operator_error(t)),
     };
     it.next();
     Ok(p)
 }
 
-// TODO do this nicer, we know that the parsed list is values separated by operators
-// fn calculate(firstValue: TimeValue, terms: &[(Operator, TimeValue)])
-fn calculate(parsed: &[Parsed]) -> TimeValue {
-    let mut it = parsed.iter().peekable();
-    let mut t = match it.next().unwrap() {
-        Parsed::Value(t) => *t,
-        _ => todo!(),
-    };
-
-    while it.peek().is_some() {
-        let op = match it.next().unwrap() {
-            Parsed::Operator(o) => o,
-            _ => todo!(),
-        };
-        let v = match it.next().unwrap() {
-            Parsed::Value(v) => v,
-            _ => todo!(),
-        };
-
-        match op {
-            Operator::Add => t.add(v),
-            Operator::Subtract => t.subtract(v),
-        };
-    }
-
-    t
+fn calculate(parsed: &(TimeValue, Vec<(Operator, TimeValue)>)) -> TimeValue {
+    parsed
+        .1
+        .iter()
+        .fold(parsed.0, |mut acc, (op, value)| match op {
+            Operator::Add => *acc.add(value),
+            Operator::Subtract => *acc.subtract(value),
+        })
 }
