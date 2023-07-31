@@ -1,6 +1,11 @@
 use std::env;
 
 fn main() {
+    if env::args().any(|arg| arg == "--version") {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     let input = env::args().skip(1).collect::<Vec<String>>().join(" ");
     match evaluate(&input) {
         Ok(result) => print!("{}", result),
@@ -99,49 +104,56 @@ enum Operator {
     Subtract,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TimeValue {
-    hours: u32,
-    minutes: u32,
+    total_minutes: i64,
 }
 
 impl TimeValue {
-    fn new(hours: u32, minutes: u32) -> Self {
-        *TimeValue { hours, minutes }.normalize()
+    fn new(hours: i64, minutes: i64) -> Self {
+        TimeValue {
+            total_minutes: hours * 60 + minutes,
+        }
     }
 
-    fn from_hours(hours: u32) -> Self {
+    fn from_hours(hours: i64) -> Self {
         TimeValue::new(hours, 0)
     }
 
-    fn normalize(&mut self) -> &Self {
-        let total_minutes = self.hours * 60 + self.minutes;
-        self.minutes = total_minutes % 60;
-        self.hours = (total_minutes - self.minutes) / 60;
+    fn add(&mut self, v: &TimeValue) -> &Self {
+        self.total_minutes += v.total_minutes;
         self
     }
 
-    fn add(&mut self, v: &TimeValue) -> &Self {
-        self.hours += v.hours;
-        self.minutes += v.minutes;
-        self.normalize()
+    fn subtract(&mut self, v: &TimeValue) -> &Self {
+        self.total_minutes -= v.total_minutes;
+        self
     }
 
-    fn subtract(&mut self, v: &TimeValue) -> &Self {
-        self.hours -= v.hours;
-        self.minutes -= v.minutes;
-        self.normalize()
+    fn hours(&self) -> i64 {
+        self.total_minutes / 60
+    }
+
+    fn minutes(&self) -> i64 {
+        self.total_minutes % 60
+    }
+
+    fn is_negative(&self) -> bool {
+        self.total_minutes < 0
     }
 }
 
 impl std::fmt::Display for TimeValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let hour_padding = if self.hours < 10 { "0" } else { "" };
-        let minute_padding = if self.minutes < 10 { "0" } else { "" };
+        let sign = if self.is_negative() { "-" } else { "" };
+        let hours = self.hours().abs();
+        let minutes = self.minutes().abs();
+        let hour_padding = if hours < 10 { "0" } else { "" };
+        let minute_padding = if minutes < 10 { "0" } else { "" };
         write!(
             f,
-            "{}{}:{}{}",
-            hour_padding, self.hours, minute_padding, self.minutes
+            "{}{}{}:{}{}",
+            sign, hour_padding, hours, minute_padding, minutes,
         )
     }
 }
@@ -197,7 +209,7 @@ fn parse_value(
 ) -> Result<TimeValue, Error> {
     let t1 = it.peek().ok_or(Error::EndOfInput)?;
     let mut has_parsed = false;
-    let hours: u32 = match t1 {
+    let hours = match t1 {
         Token::Number(n) => {
             it.next();
             has_parsed = true;
