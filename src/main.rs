@@ -6,14 +6,43 @@ fn main() {
         return;
     }
 
+    if env::args().any(|arg| arg == "--format") {
+        let input = env::args()
+            .skip(1)
+            .filter(|arg| arg != "--format")
+            .collect::<Vec<String>>()
+            .join(" ");
+        return match format(&input) {
+            Ok(result) => print!("{}", result),
+            Err(err) => {
+                eprint!("{}", err);
+                std::process::exit(1);
+            }
+        };
+    }
+
     let input = env::args().skip(1).collect::<Vec<String>>().join(" ");
-    match evaluate(&input) {
+    return match evaluate(&input) {
         Ok(result) => print!("{}", result),
         Err(err) => {
             eprint!("{}", err);
             std::process::exit(1);
         }
     };
+}
+
+fn format(input: &str) -> Result<String, Error> {
+    let tokens = tokenize(input)?;
+    let (first, following) = parse(&tokens)?;
+    return Ok(format!(
+        "{}{}",
+        first,
+        following
+            .iter()
+            .map(|(op, value)| format!(" {} {}", op, value))
+            .collect::<Vec<String>>()
+            .join("")
+    ));
 }
 
 fn evaluate(input: &str) -> Result<TimeValue, Error> {
@@ -42,8 +71,8 @@ impl std::fmt::Display for Token {
 }
 
 #[derive(Clone, Debug)]
-struct UnrecognizedCharacter {
-    unrecognized: char,
+struct UnexpectedCharacter {
+    unexpected: char,
 }
 
 #[derive(Clone, Debug)]
@@ -54,20 +83,20 @@ struct UnexpectedToken {
 
 #[derive(Clone, Debug)]
 enum Error {
-    UnrecognizedCharacter(UnrecognizedCharacter),
+    UnexpectedCharacter(UnexpectedCharacter),
     UnexpectedToken(UnexpectedToken),
     EndOfInput,
 }
 
 impl Error {
-    fn expected_number_found(token: &Token) -> Error {
+    fn expected_number_but_found(token: &Token) -> Error {
         Error::UnexpectedToken(UnexpectedToken {
             expected: "number",
             unexpected: token.clone(),
         })
     }
 
-    fn expected_operator_found(token: &Token) -> Error {
+    fn expected_operator_but_found(token: &Token) -> Error {
         Error::UnexpectedToken(UnexpectedToken {
             expected: "operator",
             unexpected: token.clone(),
@@ -78,10 +107,10 @@ impl Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::UnrecognizedCharacter(unrecognized_character) => write!(
+            Error::UnexpectedCharacter(unexpected_character) => write!(
                 f,
-                "error: unrecognized character '{}'",
-                unrecognized_character.unrecognized,
+                "error: unexpected character '{}'",
+                unexpected_character.unexpected,
             ),
             Error::UnexpectedToken(unexpected_token) => write!(
                 f,
@@ -117,8 +146,8 @@ fn tokenize(input: &str) -> Result<Vec<Token>, Error> {
         } else if ch == '-' {
             tokens.push(Token::Minus);
         } else {
-            return Err(Error::UnrecognizedCharacter(UnrecognizedCharacter {
-                unrecognized: ch,
+            return Err(Error::UnexpectedCharacter(UnexpectedCharacter {
+                unexpected: ch,
             }));
         }
     }
@@ -130,6 +159,15 @@ fn tokenize(input: &str) -> Result<Vec<Token>, Error> {
 enum Operator {
     Add,
     Subtract,
+}
+
+impl std::fmt::Display for Operator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Operator::Add => write!(f, "+"),
+            Operator::Subtract => write!(f, "-"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -214,7 +252,7 @@ fn parse_value(
     match it.peek() {
         Some(Token::Colon) => it.next(),
         _ if hours.is_some() => return Ok(TimeValue::from_hours(hours.unwrap())),
-        Some(t) => return Err(Error::expected_number_found(t)),
+        Some(t) => return Err(Error::expected_number_but_found(t)),
         None => return Err(Error::EndOfInput),
     };
 
@@ -223,7 +261,7 @@ fn parse_value(
             it.next();
             Ok(TimeValue::new(hours.unwrap_or(0), n.parse().unwrap()))
         }
-        t => Err(Error::expected_number_found(t)),
+        t => Err(Error::expected_number_but_found(t)),
     }
 }
 
@@ -233,7 +271,7 @@ fn parse_operator(
     let op = match it.peek().ok_or(Error::EndOfInput)? {
         Token::Plus => Operator::Add,
         Token::Minus => Operator::Subtract,
-        t => return Err(Error::expected_operator_found(t)),
+        t => return Err(Error::expected_operator_but_found(t)),
     };
     it.next();
     Ok(op)
