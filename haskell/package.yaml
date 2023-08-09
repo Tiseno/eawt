@@ -1,0 +1,30 @@
+name:                eawt
+version:             0.1.0.0
+license:             BSD3
+author:              "Mathias Lindgren"
+maintainer:          "math.lindgren@gmail.com"
+copyright:           "2023 Mathias Lindgren"
+
+dependencies:
+- base >= 4.7 && < 5
+- stack
+
+ghc-options:
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-export-lists
+- -Wmissing-home-modules
+- -Wredundant-constraints
+# - -Wpartial-fields
+
+executables:
+  eawt:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N

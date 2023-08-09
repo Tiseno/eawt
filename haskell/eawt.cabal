@@ -1,0 +1,26 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.35.1.
+--
+-- see: https://github.com/sol/hpack
+
+name:           eawt
+version:        0.1.0.0
+author:         Mathias Lindgren
+maintainer:     math.lindgren@gmail.com
+copyright:      2023 Mathias Lindgren
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+
+executable eawt
+  main-is: Main.hs
+  other-modules:
+      Paths_eawt
+  hs-source-dirs:
+      app
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , stack
+  default-language: Haskell2010
