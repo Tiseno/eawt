@@ -1,135 +1,40 @@
-{-# LANGUAGE PatternSynonyms #-}
-
-import           Control.Monad      (when)
+import           Data.Bifunctor     (first)
 import           Data.Char          (isDigit, isSpace)
 import           System.Environment (getArgs)
 import           System.Exit        (exitFailure, exitSuccess)
-import           System.IO          (stderr, hPutStr)
-
-main :: IO ()
-main = do
-  args <- getArgs
-  when ("--format" `elem` args) $ do
-    let input = unwords $ filter (/= "--format") args
-    case format input of
-      Ok ok -> do
-        putStr ok
-        exitSuccess
-      Err err -> do
-        hPutStr stderr $ show err
-        exitFailure
-  let input = unwords args
-  case evaluate input of
-    Ok ok -> do
-      putStr $ show ok
-      exitSuccess
-    Err err -> do
-      hPutStr stderr $ show err
-      exitFailure
-
-data Token
-  = Number String
-  | Colon
-  | Plus
-  | Minus
-
-instance Show Token where
-  show (Number n) = n
-  show Colon      = ":"
-  show Plus       = "+"
-  show Minus      = "-"
-
-type Result a b = Either a b
-
-{-# COMPLETE Err, Ok #-}
-
-pattern Err :: a -> Either a b
-
-pattern Err x = Left x
-
-pattern Ok :: b -> Either a b
-
-pattern Ok x = Right x
+import           System.IO          (hPutStr, stderr)
 
 data Error
   = UnexpectedCharacter
-      { unexpectedChar :: Char
-      }
-  | UnexpectedToken
-      { expected        :: String
-      , unexpectedToken :: Token
+      { expected       :: String
+      , unexpectedChar :: Char
       }
   | EndOfInput
 
 instance Show Error where
-  show (UnexpectedCharacter {unexpectedChar = u}) =
-    "error: unexpected character '" ++ [u] ++ "'"
-  show (UnexpectedToken {expected = e, unexpectedToken = t}) =
-    "error: expected " ++ e ++ " but found " ++ show t
+  show (UnexpectedCharacter {expected = e, unexpectedChar = u}) =
+    "error: expected " ++ e ++ " but found '" ++ [u] ++ "'"
   show EndOfInput = "error: unexpected end of input"
-
-format :: String -> Result Error String
-format input = do
-  tokens <- tokenize input
-  (first, following) <- parse tokens
-  Ok $
-    show first ++
-    concatMap (\(op, value) -> " " ++ show op ++ " " ++ show value) following
-
-tokenize :: String -> Result Error [Token]
-tokenize input = fst <$> tokenizeR ([], input)
-
-tokenizeR :: ([Token], String) -> Result Error ([Token], String)
-tokenizeR (tokens, []) = Ok (tokens, [])
-tokenizeR (tokens, input@(x:xs)) =
-  case x of
-    ':' -> tokenizeR (tokens ++ [Colon], xs)
-    '+' -> tokenizeR (tokens ++ [Plus], xs)
-    '-' -> tokenizeR (tokens ++ [Minus], xs)
-    _
-      | isSpace x -> tokenizeR (tokens, xs)
-    _
-      | isDigit x ->
-        let (digits, rest) = span isDigit input
-         in tokenizeR (tokens ++ [Number digits], rest)
-    ch -> Err $ UnexpectedCharacter {unexpectedChar = ch}
 
 newtype TimeValue =
   TimeValue Int
 
 instance Show TimeValue where
-  show value =
-    let sign =
-          if isNegative value
-            then "-"
-            else ""
+  show value@(TimeValue i) =
+    let sign = f i 0 "-"
         hours = abs $ getHours value
         minutes = abs $ getMinutes value
-        hourPadding =
-          if hours < 10
-            then "0"
-            else ""
-        minutePadding =
-          if minutes < 10
-            then "0"
-            else ""
-     in sign ++
-        hourPadding ++ show hours ++ ":" ++ minutePadding ++ show minutes
+        hPad = f hours 10 "0"
+        mPad = f minutes 10 "0"
+     in sign ++ hPad ++ show hours ++ ":" ++ mPad ++ show minutes
+    where
+      f v c s =
+        if v < c
+          then s
+          else ""
 
 newTimeValue :: Int -> Int -> TimeValue
 newTimeValue hours minutes = TimeValue $ hours * 60 + minutes
-
-fromHours :: Int -> TimeValue
-fromHours hours = newTimeValue hours 0
-
-fromMinutes :: Int -> TimeValue
-fromMinutes = newTimeValue 0
-
-add :: TimeValue -> TimeValue -> TimeValue
-add (TimeValue t1) (TimeValue t2) = TimeValue (t1 + t2)
-
-subtract :: TimeValue -> TimeValue -> TimeValue
-subtract (TimeValue t1) (TimeValue t2) = TimeValue (t1 - t2)
 
 getHours :: TimeValue -> Int
 getHours (TimeValue t) = t `div` 60
@@ -137,55 +42,55 @@ getHours (TimeValue t) = t `div` 60
 getMinutes :: TimeValue -> Int
 getMinutes (TimeValue t) = t `mod` 60
 
-isNegative :: TimeValue -> Bool
-isNegative (TimeValue t) = t < 0
+parseAndCalculate :: String -> Either Error TimeValue
+parseAndCalculate s = parseValue (dropWhile isSpace s) >>= parseAndFoldTerms
 
-data Operator
-  = Add
-  | Subtract
+parseValue :: String -> Either Error (TimeValue, String)
+parseValue [] = Left EndOfInput
+parseValue (':':s) = first (newTimeValue 0) <$> parseInt s
+parseValue s = do
+  (hours, s') <- parseInt s
+  case s' of
+    (':':s'') -> first (newTimeValue hours) <$> parseInt s''
+    _         -> Right (newTimeValue hours 0, s')
 
-instance Show Operator where
-  show Add      = "+"
-  show Subtract = "-"
+parseInt :: String -> Either Error (Int, String)
+parseInt [] = Left EndOfInput
+parseInt s@(x:_)
+  | isDigit x = Right $ first read $ span isDigit s
+parseInt (x:_) = Left $ UnexpectedCharacter "number" x
 
-evaluate :: [Char] -> Result Error TimeValue
-evaluate input = do
-  tokens <- tokenize input
-  parsed <- parse tokens
-  Ok $ calculate parsed
+parseAndFoldTerms :: (TimeValue, String) -> Either Error TimeValue
+parseAndFoldTerms (acc, s) =
+  case dropWhile isSpace s of
+    [] -> Right acc
+    s' -> do
+      (op, v, s'') <- parseTerm s'
+      parseAndFoldTerms (acc `op` v, s'')
 
-parse :: [Token] -> Result Error (TimeValue, [(Operator, TimeValue)])
-parse tokens = do
-  (first, rest) <- parseValue tokens
-  (following, _) <- parseFollowing rest
-  Ok (first, following)
+parseTerm ::
+     String
+  -> Either Error (TimeValue -> TimeValue -> TimeValue, TimeValue, String)
+parseTerm s = do
+  (op, s') <- parseOperator s
+  (v, s'') <- parseValue $ dropWhile isSpace s'
+  Right (op, v, s'')
 
-parseValue :: [Token] -> Either Error (TimeValue, [Token])
-parseValue ((Number hours):Colon:(Number minutes):xs) =
-  Ok (newTimeValue (read hours) (read minutes), xs)
-parseValue ((Number hours):xs) = Ok (fromHours (read hours), xs)
-parseValue (Colon:(Number minutes):xs) = Ok (fromMinutes (read minutes), xs)
-parseValue [] = Err EndOfInput
-parseValue (x:_) =
-  Err UnexpectedToken {expected = "number", unexpectedToken = x}
-
-parseOperator :: [Token] -> Either Error (Operator, [Token])
-parseOperator (Plus:xs) = Ok (Add, xs)
-parseOperator (Minus:xs) = Ok (Subtract, xs)
-parseOperator [] = Err EndOfInput
-parseOperator (x:_) =
-  Err UnexpectedToken {expected = "operator", unexpectedToken = x}
-
-parseFollowing :: [Token] -> Either Error ([(Operator, TimeValue)], [Token])
-parseFollowing [] = Ok ([], [])
-parseFollowing tokens = do
-  (op, rest) <- parseOperator tokens
-  (value, rest') <- parseValue rest
-  (following, rest'') <- parseFollowing rest'
-  Ok ((op, value) : following, rest'')
-
-calculate :: (TimeValue, [(Operator, TimeValue)]) -> TimeValue
-calculate (first, following) = foldl doOp first following
+parseOperator ::
+     String -> Either Error (TimeValue -> TimeValue -> TimeValue, String)
+parseOperator [] = Left EndOfInput
+parseOperator ('+':s) = Right (add, s)
   where
-    doOp a (Add, b)      = add a b
-    doOp a (Subtract, b) = Main.subtract a b
+    add (TimeValue t1) (TimeValue t2) = TimeValue (t1 + t2)
+parseOperator ('-':s) = Right (sub, s)
+  where
+    sub (TimeValue t1) (TimeValue t2) = TimeValue (t1 - t2)
+parseOperator (x:_) =
+  Left UnexpectedCharacter {expected = "operator", unexpectedChar = x}
+
+main :: IO ()
+main = do
+  input <- unwords <$> getArgs
+  case parseAndCalculate input of
+    Left err -> hPutStr stderr (show err) >>= const exitFailure
+    Right ok -> putStr (show ok) >>= const exitSuccess
