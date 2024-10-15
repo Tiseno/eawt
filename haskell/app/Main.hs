@@ -1,5 +1,7 @@
+import           Control.Monad      (when)
 import           Data.Bifunctor     (first)
 import           Data.Char          (isDigit, isSpace)
+import           Data.List          (partition)
 import           System.Environment (getArgs)
 import           System.Exit        (exitFailure, exitSuccess)
 import           System.IO          (hPutStr, stderr)
@@ -82,9 +84,29 @@ parseOperator (x:_) = Left $ unexpectedCharacter x "operator"
 parseAndCalculate :: String -> Either String TimeValue
 parseAndCalculate s = parseValue (dropWhile isSpace s) >>= parseAndFoldTerms
 
+isFlag :: String -> Bool
+isFlag ('-':'-':_) = True
+isFlag _           = False
+
 main :: IO ()
 main = do
-  input <- unwords <$> getArgs
-  case parseAndCalculate input of
-    Left err -> hPutStr stderr err >>= const exitFailure
-    Right ok -> putStr (showTime ok) >>= const exitSuccess
+  (flags, input) <- partition isFlag . words . unwords <$> getArgs
+  when ("--help" `elem` flags) $ do
+    putStrLn $ unlines
+      [ "Usage: eawt [EXPRESSION]"
+      , ""
+      , "Performs addition and subtraction on time values."
+      , ""
+      , "Example usage:"
+      , ""
+      , "eawt 3 + 1:00 + :15 - 0:32"
+      , "03:43"
+      ]
+    exitSuccess
+  case parseAndCalculate $ unwords input of
+    Left err -> do
+      hPutStr stderr err
+      exitFailure
+    Right ok -> do
+      putStr $ showTime ok
+      exitSuccess
